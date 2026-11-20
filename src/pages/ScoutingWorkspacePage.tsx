@@ -20,7 +20,6 @@ import {
     type RankedCandidateResponse,
     type RecruiterCandidateResponse,
 } from '../features/scouting/api/scoutingApi';
-import { Button } from '../shared/ui/Button';
 
 interface PipelineCard extends RecruiterCandidateResponse {
     fullName: string;
@@ -44,20 +43,20 @@ export function ScoutingWorkspacePage() {
         useVacanciesQuery();
 
     const [selectedVacancyId, setSelectedVacancyId] = useState<number | null>(
-        null
+        () => {
+            const saved = localStorage.getItem('scoutly_selected_vacancy_id');
+            return saved ? Number(saved) : null;
+        }
     );
     const [minScoreFilter, setMinScoreFilter] = useState<number>(0);
 
-    // Выбранный кандидат для детального скоринга (match-score)
     const [inspectCandidate, setInspectCandidate] =
         useState<RankedCandidateResponse | null>(null);
 
-    // Кандидат в воронке, для которого открыт журнал истории (history/{id})
     const [activeHistoryCard, setActiveHistoryCard] =
         useState<PipelineCard | null>(null);
     const [stageComment, setStageComment] = useState('');
 
-    // Локальное хранилище добавленных карточек воронки (т.к. на бэкенде нет GET /scouting/pipeline)
     const [pipelineCards, setPipelineCards] = useState<PipelineCard[]>(() => {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -72,7 +71,9 @@ export function ScoutingWorkspacePage() {
     }, [pipelineCards]);
 
     useEffect(() => {
-        if (selectedVacancyId === null && vacancies.length > 0) {
+        if (vacancies.length === 0) return;
+        const exists = vacancies.some((v) => v.id === selectedVacancyId);
+        if (!exists) {
             setSelectedVacancyId(vacancies[0].id);
         }
     }, [vacancies, selectedVacancyId]);
@@ -131,7 +132,7 @@ export function ScoutingWorkspacePage() {
             setActiveHistoryCard(newCard);
         } catch (err) {
             console.error('Ошибка добавления в воронку:', err);
-            alert('Не удалось добавить кандидата в воронку. Проверьте ID рекрутера в БД.');
+            alert('Не удалось добавить кандидата в воронку. Попробуйте снова.');
         }
     };
 
@@ -160,18 +161,17 @@ export function ScoutingWorkspacePage() {
             setStageComment('');
         } catch (err) {
             console.error('Ошибка смены этапа:', err);
-            alert('Сервер отклонил смену этапа. Проверьте допустимые значения CandidateStages.');
+            alert('Не удалось обновить этап кандидата.');
         }
     };
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-            {/* Шапка и выбор вакансии */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div>
                     <div className="flex items-center gap-2 text-[#1F4E79] font-semibold text-sm mb-1">
                         <Sparkles className="w-4 h-4 text-[#A80036]" />
-                        <span>Интеллектуальный скаутинг и скоринг</span>
+                        <span>Интеллектуальный поиск и оценка</span>
                     </div>
                     <h1 className="text-2xl font-bold text-slate-900">
                         Автоподбор кандидатов
@@ -186,7 +186,9 @@ export function ScoutingWorkspacePage() {
                         <select
                             value={selectedVacancyId ?? ''}
                             onChange={(e) => {
-                                setSelectedVacancyId(Number(e.target.value));
+                                const nextId = Number(e.target.value);
+                                setSelectedVacancyId(nextId);
+                                localStorage.setItem('scoutly_selected_vacancy_id', String(nextId));
                                 setInspectCandidate(null);
                             }}
                             disabled={isVacanciesLoading || vacancies.length === 0}
@@ -197,7 +199,7 @@ export function ScoutingWorkspacePage() {
                             )}
                             {vacancies.map((v) => (
                                 <option key={v.id} value={v.id}>
-                                    #{v.id} — {v.title} ({v.companyName})
+                                    {v.title} ({v.companyName})
                                 </option>
                             ))}
                         </select>
@@ -206,7 +208,7 @@ export function ScoutingWorkspacePage() {
                     <div className="flex flex-col">
                         <label className="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
                             <SlidersHorizontal className="w-3 h-3" />
-                            Мин. скоринг: {minScoreFilter}%
+                            Мин. совпадение: {minScoreFilter}%
                         </label>
                         <input
                             type="range"
@@ -221,20 +223,11 @@ export function ScoutingWorkspacePage() {
                 </div>
             </div>
 
-            {/* Основная сетка: Ранжированная выдача слева + Детали скоринга/Истории справа */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Левая колонка (2/3): Список кандидатов из AutoMatch */}
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold text-slate-900">
-                            Релевантные специалисты ({filteredCandidates.length})
-                        </h2>
-                        {selectedVacancyId && (
-                            <span className="text-xs text-slate-500">
-                GET /api/scouting/auto-match/{selectedVacancyId}
-              </span>
-                        )}
-                    </div>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                        Релевантные специалисты ({filteredCandidates.length})
+                    </h2>
 
                     {isMatching ? (
                         <div className="space-y-3">
@@ -250,12 +243,8 @@ export function ScoutingWorkspacePage() {
                             Не удалось загрузить подборку кандидатов для выбранной вакансии.
                         </div>
                     ) : filteredCandidates.length === 0 ? (
-                        <div className="p-10 text-center bg-white rounded-2xl border border-slate-200 text-slate-500">
-                            По выбранным критериям кандидаты не найдены. Попробуйте снизить порог скоринга или проверьте наличие профилей в таблице{' '}
-                            <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">
-                                specialist_profiles
-                            </code>
-                            .
+                        <div className="p-10 text-center bg-white rounded-2xl border border-slate-200 text-slate-500 text-sm">
+                            По выбранным критериям кандидаты не найдены. Попробуйте снизить порог совпадения.
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -286,8 +275,7 @@ export function ScoutingWorkspacePage() {
                                             <div className="space-y-1.5">
                                                 <div className="flex items-center gap-2.5 flex-wrap">
                                                     <h3 className="text-base font-bold text-slate-900">
-                                                        {candidate.fullName ||
-                                                            `Специалист #${candidate.specialistProfileId}`}
+                                                        {candidate.fullName || 'Специалист'}
                                                     </h3>
                                                     <span
                                                         className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeColor}`}
@@ -319,20 +307,21 @@ export function ScoutingWorkspacePage() {
                                             </div>
 
                                             <div className="flex items-center gap-2 shrink-0">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
+                                                <button
+                                                    type="button"
                                                     onClick={() => setInspectCandidate(candidate)}
+                                                    className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                                                 >
-                                                    Разбор скоринга
-                                                </Button>
+                                                    Анализ навыков
+                                                </button>
 
-                                                <Button
-                                                    size="sm"
+                                                <button
+                                                    type="button"
                                                     disabled={
                                                         inPipeline || addToPipelineMutation.isPending
                                                     }
                                                     onClick={() => handleAddToPipeline(candidate)}
+                                                    className="inline-flex items-center px-3.5 py-2 rounded-xl bg-[#1F4E79] text-white text-xs font-semibold hover:bg-[#173b5c] disabled:opacity-50 transition-colors"
                                                 >
                                                     {inPipeline ? (
                                                         <>
@@ -343,7 +332,7 @@ export function ScoutingWorkspacePage() {
                                                             <UserPlus className="w-4 h-4 mr-1.5" />В воронку
                                                         </>
                                                     )}
-                                                </Button>
+                                                </button>
                                             </div>
                                         </div>
 
@@ -366,15 +355,14 @@ export function ScoutingWorkspacePage() {
                     )}
                 </div>
 
-                {/* Правая колонка (1/3): Панель детального скоринга (CalculateMatchScoreQuery) */}
                 <div className="space-y-4">
                     <h2 className="text-lg font-semibold text-slate-900">
-                        Детализация скоринга
+                        Детализация соответствия
                     </h2>
 
                     {!inspectCandidate ? (
                         <div className="p-6 bg-white rounded-2xl border border-dashed border-slate-300 text-sm text-slate-500 text-center">
-                            Нажмите <strong>«Разбор скоринга»</strong> на карточке любого кандидата, чтобы проверить обязательные навыки и веса компетенций.
+                            Нажмите <strong>«Анализ навыков»</strong> на карточке кандидата, чтобы увидеть разбор компетенций.
                         </div>
                     ) : isScoreLoading ? (
                         <div className="h-48 rounded-2xl bg-slate-200/70 animate-pulse" />
@@ -388,7 +376,7 @@ export function ScoutingWorkspacePage() {
                             </div>
 
                             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-                                <span className="text-sm text-slate-600">Итоговый балл</span>
+                                <span className="text-sm text-slate-600">Итоговая оценка</span>
                                 <span className="text-xl font-extrabold text-[#1F4E79]">
                   {matchScoreDetails.matchPercentage}%
                 </span>
@@ -398,7 +386,7 @@ export function ScoutingWorkspacePage() {
                                 {matchScoreDetails.passedMandatorySkills ? (
                                     <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
                     <CheckCircle2 className="w-4 h-4" />
-                    Обязательные навыки пройдены
+                    Обязательные требования выполнены
                   </span>
                                 ) : (
                                     <span className="flex items-center gap-1.5 text-[#A80036] font-medium">
@@ -448,17 +436,14 @@ export function ScoutingWorkspacePage() {
                 </div>
             </div>
 
-            {/* Секция воронки рекрутера и истории взаимодействий */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-900">
-                            Воронка рекрутера по вакансии ({currentVacancyPipeline.length})
-                        </h2>
-                        <p className="text-xs text-slate-500">
-                            Управление этапами (POST /api/scouting/change-stage) и журнал событий
-                        </p>
-                    </div>
+                <div>
+                    <h2 className="text-lg font-bold text-slate-900">
+                        Воронка кандидатов ({currentVacancyPipeline.length})
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                        Управление этапами отбора и история коммуникаций
+                    </p>
                 </div>
 
                 {currentVacancyPipeline.length === 0 ? (
@@ -468,7 +453,6 @@ export function ScoutingWorkspacePage() {
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Карточки в воронке */}
                         <div className="lg:col-span-2 space-y-3">
                             {currentVacancyPipeline.map((card) => (
                                 <div
@@ -484,11 +468,8 @@ export function ScoutingWorkspacePage() {
                       <span className="font-bold text-slate-900">
                         {card.fullName}
                       </span>
-                                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">
-                        Запись #{card.id}
-                      </span>
                                             {card.matchScore !== null && (
-                                                <span className="text-xs font-semibold text-[#1F4E79]">
+                                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#1F4E79]/10 text-[#1F4E79]">
                           {card.matchScore}%
                         </span>
                                             )}
@@ -509,25 +490,24 @@ export function ScoutingWorkspacePage() {
                                         >
                                             {PIPELINE_STAGES.map((st) => (
                                                 <option key={st.key} value={st.key}>
-                                                    {st.label} ({st.key})
+                                                    {st.label}
                                                 </option>
                                             ))}
                                         </select>
 
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
+                                        <button
+                                            type="button"
                                             onClick={() => setActiveHistoryCard(card)}
+                                            className="inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                         >
                                             <History className="w-3.5 h-3.5 mr-1" />
                                             История
-                                        </Button>
+                                        </button>
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        {/* Журнал истории (GetCandidateHistoryQuery) */}
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
@@ -535,30 +515,28 @@ export function ScoutingWorkspacePage() {
                                     История взаимодействий
                                 </h3>
                                 {activeHistoryCard && (
-                                    <span className="text-xs text-slate-500">
-                    #{activeHistoryCard.id}
+                                    <span className="text-xs font-medium text-slate-500 truncate max-w-[140px]">
+                    {activeHistoryCard.fullName}
                   </span>
                                 )}
                             </div>
 
                             {!activeHistoryCard ? (
                                 <p className="text-xs text-slate-500">
-                                    Выберите карточку кандидата в воронке, чтобы просмотреть или дополнить журнал событий.
+                                    Выберите кандидата в воронке, чтобы просмотреть или дополнить историю заметок.
                                 </p>
                             ) : (
                                 <>
-                                    {/* Быстрый комментарий со сменой/подтверждением этапа */}
                                     <div className="space-y-2">
                     <textarea
                         rows={2}
                         value={stageComment}
                         onChange={(e) => setStageComment(e.target.value)}
-                        placeholder="Добавить заметку в историю (например: созвон в 15:00)..."
+                        placeholder="Добавить заметку (например: назначен созвон)..."
                         className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs focus:border-[#1F4E79] focus:outline-none"
                     />
-                                        <Button
-                                            size="sm"
-                                            className="w-full"
+                                        <button
+                                            type="button"
                                             disabled={
                                                 !stageComment.trim() || changeStageMutation.isPending
                                             }
@@ -569,15 +547,16 @@ export function ScoutingWorkspacePage() {
                                                     stageComment
                                                 )
                                             }
+                                            className="w-full inline-flex items-center justify-center px-3 py-2 rounded-lg bg-[#1F4E79] text-white text-xs font-semibold hover:bg-[#173b5c] disabled:opacity-40"
                                         >
                                             Сохранить заметку
                                             <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                                        </Button>
+                                        </button>
                                     </div>
 
                                     {isHistoryLoading ? (
                                         <div className="text-xs text-slate-400">
-                                            Загрузка журнала...
+                                            Загрузка истории...
                                         </div>
                                     ) : historyEntries.length === 0 ? (
                                         <div className="text-xs text-slate-400">
@@ -592,7 +571,7 @@ export function ScoutingWorkspacePage() {
                                                 >
                                                     <div className="flex items-center justify-between text-[11px] text-slate-400">
                             <span className="font-semibold text-[#1F4E79]">
-                              {entry.actionType}
+                              Событие
                             </span>
                                                         <span>
                               {new Date(entry.createdAt).toLocaleString('ru-RU', {

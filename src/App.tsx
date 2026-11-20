@@ -1,75 +1,133 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider, useAuth } from './features/auth/store/useAuthStore';
+import { Navbar } from './widgets/Navbar/Navbar';
 import { AuthPage } from './pages/AuthPage';
 import { VacanciesFeedPage } from './pages/VacanciesFeedPage';
+import { VacancyEditorPage } from './pages/VacancyEditorPage';
 import { MyApplicationsPage } from './pages/MyApplicationsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { EmployerDashboardPage } from './pages/EmployerDashboardPage';
-import { VacancyEditorPage } from './pages/VacancyEditorPage';
+import { ScoutingWorkspacePage } from './pages/ScoutingWorkspacePage';
 import { EmployerResponsesPage } from './pages/EmployerResponsesPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
-import { ScoutingWorkspacePage } from './pages/ScoutingWorkspacePage';
-import { Navbar } from './widgets/Navbar/Navbar';
-
-function AppRoutes() {
-    const { user } = useAuth();
-
-    if (!user) {
-        return (
-            <Routes>
-                <Route path="/auth" element={<AuthPage />} />
-                <Route path="*" element={<Navigate to="/auth" replace />} />
-            </Routes>
-        );
-    }
-
-    return (
-        <div className="min-h-screen bg-scoutly-bg">
-            <Navbar />
-            <Routes>
-                {/* Маршруты Соискателя */}
-                <Route path="/vacancies" element={<VacanciesFeedPage />} />
-                <Route path="/applications" element={<MyApplicationsPage />} />
-                <Route path="/profile" element={<ProfilePage />} />
-
-                {/* Маршруты Работодателя и Скаутинга */}
-                <Route path="/employer/dashboard" element={<EmployerDashboardPage />} />
-                <Route path="/employer/create" element={<VacancyEditorPage />} />
-                <Route path="/employer/responses" element={<EmployerResponsesPage />} />
-                <Route path="/employer/company" element={<CompanyProfilePage />} />
-                <Route path="/scouting" element={<ScoutingWorkspacePage />} />
-
-                <Route
-                    path="*"
-                    element={
-                        <Navigate
-                            to={user.role === 'Employer' ? '/employer/dashboard' : '/vacancies'}
-                            replace
-                        />
-                    }
-                />
-            </Routes>
-        </div>
-    );
-}
 
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
-            retry: 1,
             refetchOnWindowFocus: false,
+            retry: 1,
         },
     },
 });
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+    const isAuthenticated =
+        localStorage.getItem('scoutly_authenticated') === 'true';
+
+    if (!isAuthenticated) {
+        return <Navigate to="/auth" replace />;
+    }
+
+    return <>{children}</>;
+}
+
+function RootRedirect() {
+    const isAuthenticated =
+        localStorage.getItem('scoutly_authenticated') === 'true';
+
+    if (!isAuthenticated) {
+        return <Navigate to="/auth" replace />;
+    }
+
+    const role = localStorage.getItem('scoutly_role');
+    return (
+        <Navigate
+            to={role === 'employer' ? '/dashboard' : '/vacancies'}
+            replace
+        />
+    );
+}
 
 export function App() {
     return (
         <QueryClientProvider client={queryClient}>
             <BrowserRouter>
-                <AuthProvider>
-                    <AppRoutes />
-                </AuthProvider>
+                <div className="min-h-screen bg-slate-50 text-slate-900">
+                    <Navbar />
+                    <main>
+                        <Routes>
+                            <Route path="/" element={<RootRedirect />} />
+                            <Route path="/auth" element={<AuthPage />} />
+
+                            <Route
+                                path="/vacancies"
+                                element={
+                                    <RequireAuth>
+                                        <VacanciesFeedPage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/vacancies/create"
+                                element={
+                                    <RequireAuth>
+                                        <VacancyEditorPage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/my-applications"
+                                element={
+                                    <RequireAuth>
+                                        <MyApplicationsPage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/profile"
+                                element={
+                                    <RequireAuth>
+                                        <ProfilePage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/dashboard"
+                                element={
+                                    <RequireAuth>
+                                        <EmployerDashboardPage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/scouting"
+                                element={
+                                    <RequireAuth>
+                                        <ScoutingWorkspacePage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/responses"
+                                element={
+                                    <RequireAuth>
+                                        <EmployerResponsesPage />
+                                    </RequireAuth>
+                                }
+                            />
+                            <Route
+                                path="/company"
+                                element={
+                                    <RequireAuth>
+                                        <CompanyProfilePage />
+                                    </RequireAuth>
+                                }
+                            />
+
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                    </main>
+                </div>
             </BrowserRouter>
         </QueryClientProvider>
     );

@@ -13,8 +13,40 @@ export interface CreateSkillCommand {
     categoryId?: number | null;
 }
 
+export const TOP_SKILL_NAMES = new Set([
+    '.net 9',
+    'asp.net core',
+    'c#',
+    'ci/cd',
+    'cqrs',
+    'docker',
+    'docker compose',
+    'entity framework core',
+    'flutter',
+    'git',
+    'go',
+    'javascript',
+    'microsoft sql server',
+    'postgresql',
+    'python',
+    'react',
+    'redis',
+    'rest api',
+    'sql',
+    'typescript',
+    'vertical slice architecture',
+    'wpf',
+]);
+
+export function isTopSkill(skill: Pick<SkillResponse, 'name'>): boolean {
+    return TOP_SKILL_NAMES.has(skill.name.trim().toLowerCase());
+}
+
 export const skillsApi = {
-    getAll: async (search?: string, categoryId?: number): Promise<SkillResponse[]> => {
+    getAll: async (
+        search?: string,
+        categoryId?: number
+    ): Promise<SkillResponse[]> => {
         const { data } = await api.get<SkillResponse[]>('/skill', {
             params: { search: search || undefined, categoryId },
         });
@@ -24,6 +56,10 @@ export const skillsApi = {
     create: async (command: CreateSkillCommand): Promise<SkillResponse> => {
         const { data } = await api.post<SkillResponse>('/skill', command);
         return data;
+    },
+
+    delete: async (id: number): Promise<void> => {
+        await api.delete(`/skill/${id}`);
     },
 };
 
@@ -39,6 +75,16 @@ export function useCreateSkillMutation() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: skillsApi.create,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['skills'] });
+        },
+    });
+}
+
+export function useDeleteSkillMutation() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: skillsApi.delete,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['skills'] });
         },

@@ -1,12 +1,5 @@
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-    Inbox,
-    User,
-    MapPin,
-    Briefcase,
-    Clock,
-} from 'lucide-react';
+import { Inbox, User, MapPin, Briefcase, Clock } from 'lucide-react';
 import { api } from '../shared/api/axiosInstance';
 
 interface IncomingApplicationResponse {
@@ -32,10 +25,7 @@ const APPLICATION_STATUSES = [
 
 export function EmployerResponsesPage() {
     const queryClient = useQueryClient();
-    const [companyId] = useState<number>(() => {
-        const saved = localStorage.getItem('scoutly_company_id');
-        return saved ? Number(saved) : 1;
-    });
+    const companyId = Number(localStorage.getItem('scoutly_company_id') || '1');
 
     const {
         data: responses = [],
@@ -73,7 +63,7 @@ export function EmployerResponsesPage() {
                         Входящие отклики
                     </h1>
                     <p className="text-sm text-slate-500 mt-1">
-                        Резюме кандидатов, откликнувшихся на вакансии компании #{companyId}
+                        Резюме кандидатов, откликнувшихся на вакансии вашей компании
                     </p>
                 </div>
 
@@ -92,13 +82,12 @@ export function EmployerResponsesPage() {
                     ))}
                 </div>
             ) : isError ? (
-                <div className="p-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-                    Эндпоинт <code>GET /api/applications/incoming</code> ещё не добавлен в{' '}
-                    <code>ApplicationsController.cs</code> или бэкенд не перезапущен.
+                <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                    Не удалось загрузить список откликов. Попробуйте обновить страницу позже.
                 </div>
             ) : responses.length === 0 ? (
                 <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500 text-sm">
-                    На вакансии компании #{companyId} пока нет входящих откликов.
+                    На ваши вакансии пока не поступало откликов.
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -111,13 +100,12 @@ export function EmployerResponsesPage() {
                                 <div className="space-y-1">
                                     <div className="flex items-center gap-2 text-xs font-semibold text-[#1F4E79]">
                                         <Briefcase className="w-3.5 h-3.5" />
-                                        Вакансия: {item.vacancyTitle} (#{item.vacancyId})
+                                        Вакансия: {item.vacancyTitle}
                                     </div>
 
                                     <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                         <User className="w-4 h-4 text-slate-400" />
-                                        {item.candidateFullName ||
-                                            `Специалист #${item.specialistProfileId}`}
+                                        {item.candidateFullName || 'Кандидат'}
                                     </h2>
 
                                     {item.candidateHeadline && (
@@ -159,7 +147,7 @@ export function EmployerResponsesPage() {
                                     >
                                         {APPLICATION_STATUSES.map((st) => (
                                             <option key={st.key} value={st.key}>
-                                                {st.label} ({st.key})
+                                                {st.label}
                                             </option>
                                         ))}
                                     </select>

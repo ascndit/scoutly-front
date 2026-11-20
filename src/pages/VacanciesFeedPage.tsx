@@ -11,8 +11,11 @@ import {
     Send,
     Plus,
     X,
+    Sparkles,
+    RotateCcw,
 } from 'lucide-react';
 import { useVacanciesQuery } from '../features/vacancies/api/vacanciesApi';
+import { useSkillsQuery, isTopSkill } from '../features/skills/api/skillsApi';
 import {
     useApplyToVacancyMutation,
     useMyApplicationsQuery,
@@ -37,22 +40,26 @@ export function VacanciesFeedPage() {
         isLoading,
         isError,
     } = useVacanciesQuery();
+    const { data: directorySkills = [] } = useSkillsQuery();
 
     const vacancies = rawVacancies as VacancyItem[];
+    const isEmployer = localStorage.getItem('scoutly_role') === 'employer';
 
     const specialistProfileId = Number(
         localStorage.getItem('scoutly_specialist_profile_id') || '1'
     );
 
-    const { data: myApplications = [] } =
-        useMyApplicationsQuery(specialistProfileId);
+    const { data: myApplications = [] } = useMyApplicationsQuery(
+        isEmployer ? 0 : specialistProfileId
+    );
     const applyMutation = useApplyToVacancyMutation();
 
     const [searchQuery, setSearchQuery] = useState('');
     const [workFormatFilter, setWorkFormatFilter] = useState('ALL');
     const [cityFilter, setCityFilter] = useState('');
+    const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+    const [showAllSkills, setShowAllSkills] = useState(false);
 
-    // Состояние модального окна отклика
     const [applyingVacancy, setApplyingVacancy] = useState<VacancyItem | null>(
         null
     );
@@ -68,6 +75,63 @@ export function VacanciesFeedPage() {
         () => new Set(myApplications.map((a) => a.vacancyId)),
         [myApplications]
     );
+
+    const availableSkills = useMemo(() => {
+        const seen = new Set<string>();
+        const ordered: string[] = [];
+
+        vacancies.forEach((v) => {
+            (v.skills ?? v.requiredSkills ?? []).forEach((skill) => {
+                const key = skill.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    ordered.push(skill);
+                }
+            });
+        });
+
+        directorySkills
+            .filter((skill) => isTopSkill(skill))
+            .forEach((skill) => {
+                const key = skill.name.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    ordered.push(skill.name);
+                }
+            });
+
+        return ordered;
+    }, [vacancies, directorySkills]);
+
+    const visibleSkills = showAllSkills
+        ? availableSkills
+        : availableSkills.slice(0, 12);
+
+    const toggleSkillFilter = (skill: string) => {
+        setSelectedSkills((prev) => {
+            const exists = prev.some((s) => s.toLowerCase() === skill.toLowerCase());
+            if (exists) {
+                return prev.filter((s) => s.toLowerCase() !== skill.toLowerCase());
+            }
+            return [...prev, skill];
+        });
+    };
+
+    const isSkillSelected = (skill: string) =>
+        selectedSkills.some((s) => s.toLowerCase() === skill.toLowerCase());
+
+    const hasActiveFilters =
+        searchQuery.trim() !== '' ||
+        cityFilter.trim() !== '' ||
+        workFormatFilter !== 'ALL' ||
+        selectedSkills.length > 0;
+
+    const resetFilters = () => {
+        setSearchQuery('');
+        setCityFilter('');
+        setWorkFormatFilter('ALL');
+        setSelectedSkills([]);
+    };
 
     const filteredVacancies = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
@@ -88,9 +152,15 @@ export function VacanciesFeedPage() {
             const matchesCity =
                 !cityQ || (v.city ?? '').toLowerCase().includes(cityQ);
 
-            return matchesQuery && matchesFormat && matchesCity;
+            const matchesSkills =
+                selectedSkills.length === 0 ||
+                selectedSkills.every((reqSkill) =>
+                    skillsList.some((s) => s.toLowerCase() === reqSkill.toLowerCase())
+                );
+
+            return matchesQuery && matchesFormat && matchesCity && matchesSkills;
         });
-    }, [vacancies, searchQuery, workFormatFilter, cityFilter]);
+    }, [vacancies, searchQuery, workFormatFilter, cityFilter, selectedSkills]);
 
     const formatSalary = (from?: number | null, to?: number | null) => {
         if (from && to) {
@@ -98,7 +168,7 @@ export function VacanciesFeedPage() {
         }
         if (from) return `от ${from.toLocaleString('ru-RU')} ₽`;
         if (to) return `до ${to.toLocaleString('ru-RU')} ₽`;
-        return 'Зарплата не указана';
+        return 'Зарплата по договорённости';
     };
 
     const handleOpenApplyModal = (vacancy: VacancyItem) => {
@@ -132,7 +202,7 @@ export function VacanciesFeedPage() {
             } else {
                 setFeedbackMessage({
                     type: 'error',
-                    text: 'Ошибка отправки отклика. Проверьте, существует ли профиль соискателя в БД.',
+                    text: 'Не удалось отправить отклик. Пожалуйста, заполните профиль соискателя и попробуйте снова.',
                 });
             }
             setApplyingVacancy(null);
@@ -141,35 +211,27 @@ export function VacanciesFeedPage() {
 
     return (
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-            {/* Заголовок и статус API */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div>
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                        <h1 className="text-2xl font-bold text-slate-900">
-                            Лента вакансий
-                        </h1>
-                        {!isLoading && !isError && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Подключено к API ({vacancies.length})
-              </span>
-                        )}
-                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        Актуальные вакансии
+                    </h1>
                     <p className="text-sm text-slate-500 mt-1">
-                        Актуальные позиции из PostgreSQL с прямым откликом в один клик
+                        Найдено предложений: {filteredVacancies.length}
                     </p>
                 </div>
 
-                <Link
-                    to="/vacancies/create"
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1F4E79] text-white text-sm font-semibold hover:bg-[#173b5c] transition-colors shrink-0"
-                >
-                    <Plus className="w-4 h-4" />
-                    Создать вакансию
-                </Link>
+                {isEmployer && (
+                    <Link
+                        to="/vacancies/create"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#A80036] text-white text-sm font-semibold hover:bg-[#8a002c] transition-colors shrink-0"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Разместить вакансию
+                    </Link>
+                )}
             </div>
 
-            {/* Уведомление об отправке отклика */}
             {feedbackMessage && (
                 <div
                     className={`flex items-center justify-between p-4 rounded-xl border text-sm font-medium ${
@@ -189,44 +251,105 @@ export function VacanciesFeedPage() {
                 </div>
             )}
 
-            {/* Панель поиска и фильтров */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="md:col-span-2 relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Должность, компания или навык (C#, React, Docker)..."
-                        className="w-full pl-10 pr-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:border-[#1F4E79] focus:outline-none"
-                    />
+            {/* Панель поиска и фильтрации */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="md:col-span-2 relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Должность, компания или навык..."
+                            className="w-full pl-10 pr-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:border-[#1F4E79] focus:outline-none"
+                        />
+                    </div>
+
+                    <div>
+                        <input
+                            type="text"
+                            value={cityFilter}
+                            onChange={(e) => setCityFilter(e.target.value)}
+                            placeholder="Город"
+                            className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:border-[#1F4E79] focus:outline-none"
+                        />
+                    </div>
+
+                    <div>
+                        <select
+                            value={workFormatFilter}
+                            onChange={(e) => setWorkFormatFilter(e.target.value)}
+                            className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 focus:border-[#1F4E79] focus:outline-none"
+                        >
+                            <option value="ALL">Любой формат работы</option>
+                            <option value="Remote">Удалённо</option>
+                            <option value="Hybrid">Гибрид</option>
+                            <option value="Office">Офис</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div>
-                    <input
-                        type="text"
-                        value={cityFilter}
-                        onChange={(e) => setCityFilter(e.target.value)}
-                        placeholder="Город (например, Новосибирск)"
-                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:border-[#1F4E79] focus:outline-none"
-                    />
-                </div>
+                {/* Фильтр по навыкам (только топ и навыки из активных вакансий) */}
+                {availableSkills.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <Sparkles className="w-3.5 h-3.5 text-[#1F4E79]" />
+                Фильтр по навыкам
+                  {selectedSkills.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-[#1F4E79]/10 text-[#1F4E79] text-[11px] font-bold">
+                    {selectedSkills.length}
+                  </span>
+                  )}
+              </span>
 
-                <div>
-                    <select
-                        value={workFormatFilter}
-                        onChange={(e) => setWorkFormatFilter(e.target.value)}
-                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700 focus:border-[#1F4E79] focus:outline-none"
-                    >
-                        <option value="ALL">Любой формат работы</option>
-                        <option value="Remote">Удалённо (Remote)</option>
-                        <option value="Hybrid">Гибрид (Hybrid)</option>
-                        <option value="Office">Офис (Office)</option>
-                    </select>
-                </div>
+                            {hasActiveFilters && (
+                                <button
+                                    type="button"
+                                    onClick={resetFilters}
+                                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#A80036] hover:underline"
+                                >
+                                    <RotateCcw className="w-3 h-3" />
+                                    Сбросить фильтры
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {visibleSkills.map((skill) => {
+                                const active = isSkillSelected(skill);
+                                return (
+                                    <button
+                                        key={skill}
+                                        type="button"
+                                        onClick={() => toggleSkillFilter(skill)}
+                                        className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
+                                            active
+                                                ? 'bg-[#1F4E79] text-white border-[#1F4E79] shadow-sm'
+                                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-[#1F4E79] hover:bg-white'
+                                        }`}
+                                    >
+                                        {skill}
+                                    </button>
+                                );
+                            })}
+
+                            {availableSkills.length > 12 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAllSkills((prev) => !prev)}
+                                    className="px-2.5 py-1 rounded-xl text-xs font-semibold text-[#1F4E79] hover:bg-[#1F4E79]/10 transition-colors"
+                                >
+                                    {showAllSkills
+                                        ? 'Свернуть'
+                                        : `Ещё ${availableSkills.length - 12}...`}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* Список карточек вакансий */}
             {isLoading ? (
                 <div className="space-y-4">
                     {[1, 2, 3].map((i) => (
@@ -238,11 +361,23 @@ export function VacanciesFeedPage() {
                 </div>
             ) : isError ? (
                 <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">
-                    Не удалось загрузить вакансии с сервера. Убедитесь, что ASP.NET Core API запущен на порту 5202.
+                    Не удалось загрузить список вакансий. Попробуйте обновить страницу позже.
                 </div>
             ) : filteredVacancies.length === 0 ? (
-                <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-500">
-                    Вакансии по заданным фильтрам не найдены.
+                <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
+                    <p className="text-slate-500 text-sm">
+                        По вашему запросу вакансий не найдено. Попробуйте изменить выбранные навыки или параметры поиска.
+                    </p>
+                    {hasActiveFilters && (
+                        <button
+                            type="button"
+                            onClick={resetFilters}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Сбросить все фильтры
+                        </button>
+                    )}
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -287,23 +422,25 @@ export function VacanciesFeedPage() {
                                         </div>
                                     </div>
 
-                                    <div className="shrink-0">
-                                        {isApplied ? (
-                                            <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-semibold">
-                        <CheckCircle2 className="w-4 h-4" />
-                        Вы откликнулись
-                      </span>
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleOpenApplyModal(vacancy)}
-                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#A80036] text-white text-sm font-semibold hover:bg-[#8a002c] transition-colors shadow-sm"
-                                            >
-                                                <Send className="w-4 h-4" />
-                                                Откликнуться
-                                            </button>
-                                        )}
-                                    </div>
+                                    {!isEmployer && (
+                                        <div className="shrink-0">
+                                            {isApplied ? (
+                                                <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-semibold">
+                          <CheckCircle2 className="w-4 h-4" />
+                          Вы откликнулись
+                        </span>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenApplyModal(vacancy)}
+                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#A80036] text-white text-sm font-semibold hover:bg-[#8a002c] transition-colors shadow-sm"
+                                                >
+                                                    <Send className="w-4 h-4" />
+                                                    Откликнуться
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {vacancy.description && (
@@ -314,14 +451,24 @@ export function VacanciesFeedPage() {
 
                                 {skillsList.length > 0 && (
                                     <div className="flex flex-wrap gap-1.5 pt-1">
-                                        {skillsList.map((skill) => (
-                                            <span
-                                                key={skill}
-                                                className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-[#1F4E79]/10 text-[#1F4E79]"
-                                            >
-                        {skill}
-                      </span>
-                                        ))}
+                                        {skillsList.map((skill) => {
+                                            const active = isSkillSelected(skill);
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={skill}
+                                                    onClick={() => toggleSkillFilter(skill)}
+                                                    title="Фильтровать по этому навыку"
+                                                    className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors ${
+                                                        active
+                                                            ? 'bg-[#1F4E79] text-white'
+                                                            : 'bg-[#1F4E79]/10 text-[#1F4E79] hover:bg-[#1F4E79]/20'
+                                                    }`}
+                                                >
+                                                    {skill}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -330,15 +477,16 @@ export function VacanciesFeedPage() {
                 </div>
             )}
 
-            {/* Модальное окно отправки отклика */}
             {applyingVacancy && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
                     <div className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-xl p-6 space-y-4">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                <span className="text-xs font-semibold text-[#1F4E79]">
-                  Отклик от профиля #{specialistProfileId}
-                </span>
+                                {applyingVacancy.companyName && (
+                                    <span className="text-xs font-semibold text-[#1F4E79]">
+                    {applyingVacancy.companyName}
+                  </span>
+                                )}
                                 <h3 className="text-lg font-bold text-slate-900">
                                     {applyingVacancy.title}
                                 </h3>
@@ -390,5 +538,3 @@ export function VacanciesFeedPage() {
         </div>
     );
 }
-
-export default VacanciesFeedPage;

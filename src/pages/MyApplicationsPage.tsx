@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     FileText,
@@ -43,10 +42,9 @@ const STATUS_MAP: Record<
 };
 
 export function MyApplicationsPage() {
-    const [specialistProfileId, setSpecialistProfileId] = useState<number>(() => {
-        const saved = localStorage.getItem('scoutly_specialist_profile_id');
-        return saved ? Number(saved) : 1;
-    });
+    const specialistProfileId = Number(
+        localStorage.getItem('scoutly_specialist_profile_id') || '1'
+    );
 
     const {
         data: applications = [],
@@ -54,34 +52,13 @@ export function MyApplicationsPage() {
         isError,
     } = useMyApplicationsQuery(specialistProfileId);
 
-    const handleProfileIdChange = (val: number) => {
-        const safeId = val > 0 ? val : 1;
-        setSpecialistProfileId(safeId);
-        localStorage.setItem('scoutly_specialist_profile_id', String(safeId));
-    };
-
     return (
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Мои отклики</h1>
-                    <p className="text-sm text-slate-500 mt-1">
-                        История отправленных резюме и актуальные статусы из базы Scoutly
-                    </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-slate-500">
-                        ID профиля соискателя:
-                    </label>
-                    <input
-                        type="number"
-                        min={1}
-                        value={specialistProfileId}
-                        onChange={(e) => handleProfileIdChange(Number(e.target.value))}
-                        className="w-20 rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-800 focus:border-[#1F4E79] focus:outline-none"
-                    />
-                </div>
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h1 className="text-2xl font-bold text-slate-900">Мои отклики</h1>
+                <p className="text-sm text-slate-500 mt-1">
+                    История отправленных резюме и актуальные статусы рассмотрения
+                </p>
             </div>
 
             {isLoading ? (
@@ -95,12 +72,12 @@ export function MyApplicationsPage() {
                 </div>
             ) : isError ? (
                 <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">
-                    Не удалось загрузить отклики. Проверьте, запущен ли C#-бэкенд на порту 5202.
+                    Не удалось загрузить историю откликов. Попробуйте обновить страницу позже.
                 </div>
             ) : applications.length === 0 ? (
                 <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-3">
                     <p className="text-slate-600 font-medium">
-                        У профиля #{specialistProfileId} пока нет отправленных откликов.
+                        Вы пока не откликались ни на одну вакансию.
                     </p>
                     <Link
                         to="/vacancies"
@@ -156,10 +133,6 @@ export function MyApplicationsPage() {
                       </span>
                                         </div>
                                     </div>
-
-                                    <span className="text-xs font-mono text-slate-400">
-                    Отклик #{app.id}
-                  </span>
                                 </div>
 
                                 {app.coverLetter && (
