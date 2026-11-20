@@ -1,101 +1,71 @@
-import { NavLink } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { Link, NavLink } from 'react-router-dom';
 import {
-    Sparkles,
-    LogOut,
     Briefcase,
-    FileCheck,
+    Sparkles,
+    FileCheck2,
     User,
-    PlusCircle,
     LayoutDashboard,
+    Inbox,
     Building2,
+    RefreshCw,
 } from 'lucide-react';
-import { useAuth } from '../../features/auth/store/useAuthStore';
-import { NotificationsPopover } from './NotificationsPopover';
+
+const NAV_ITEMS = [
+    { to: '/vacancies', label: 'Вакансии', icon: Briefcase },
+    { to: '/my-applications', label: 'Мои отклики', icon: FileCheck2 },
+    { to: '/profile', label: 'Профиль', icon: User },
+    { to: '/dashboard', label: 'Кабинет HR', icon: LayoutDashboard },
+    { to: '/scouting', label: 'Скаутинг', icon: Sparkles },
+    { to: '/responses', label: 'Отклики HR', icon: Inbox },
+    { to: '/company', label: 'Компания', icon: Building2 },
+];
 
 export function Navbar() {
-    const { user, logout } = useAuth();
-    if (!user) return null;
-
-    const applicantLinks = [
-        { to: '/vacancies', label: 'Вакансии', icon: Briefcase },
-        { to: '/applications', label: 'Мои отклики', icon: FileCheck },
-        { to: '/profile', label: 'Профиль', icon: User },
-    ];
-
-    const employerLinks = [
-        { to: '/employer/dashboard', label: 'Мои вакансии', icon: LayoutDashboard },
-        { to: '/employer/create', label: 'Создать вакансию', icon: PlusCircle },
-        { to: '/employer/responses', label: 'Входящие отклики', icon: FileCheck },
-        { to: '/employer/company', label: 'Профиль компании', icon: Building2 },
-        { to: '/scouting', label: 'Скаутинг', icon: Sparkles },
-    ];
-
-    const links = user.role === 'Employer' ? employerLinks : applicantLinks;
+    const activeProfileId =
+        localStorage.getItem('scoutly_specialist_profile_id') || '1';
+    const activeCompanyId = localStorage.getItem('scoutly_company_id') || '1';
 
     return (
-        <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-200">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-                <div className="flex items-center gap-8">
-                    <div className="flex items-center gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-scoutly-primary text-white">
-                            <Sparkles className="h-5 w-5 text-scoutly-accent" />
-                        </div>
-                        <span className="text-lg font-bold text-scoutly-primary tracking-tight">Scoutly</span>
+        <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+                <Link to="/vacancies" className="flex items-center gap-2.5 shrink-0">
+                    <div className="w-9 h-9 rounded-xl bg-[#1F4E79] text-white flex items-center justify-center font-extrabold text-lg shadow-sm">
+                        S
                     </div>
+                    <span className="font-extrabold text-xl tracking-tight text-slate-900">
+            Scout<span className="text-[#A80036]">ly</span>
+          </span>
+                </Link>
 
-                    <nav className="hidden md:flex items-center gap-1">
-                        {links.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <NavLink
-                                    key={item.to}
-                                    to={item.to}
-                                    className={({ isActive }) =>
-                                        `relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                            isActive ? 'text-scoutly-primary' : 'text-scoutly-muted hover:text-scoutly-dark'
-                                        }`
-                                    }
-                                >
-                                    {({ isActive }) => (
-                                        <>
-                                            <Icon className="h-4 w-4" />
-                                            <span>{item.label}</span>
-                                            {isActive && (
-                                                <motion.div
-                                                    layoutId="nav-active-pill"
-                                                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
-                                                    className="absolute inset-0 rounded-lg bg-scoutly-primary/8 -z-10"
-                                                />
-                                            )}
-                                        </>
-                                    )}
-                                </NavLink>
-                            );
-                        })}
-                    </nav>
-                </div>
+                <nav className="hidden lg:flex items-center gap-1">
+                    {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+                        <NavLink
+                            key={to}
+                            to={to}
+                            className={({ isActive }) =>
+                                `inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                                    isActive
+                                        ? 'bg-[#1F4E79] text-white'
+                                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                                }`
+                            }
+                        >
+                            <Icon className="w-3.5 h-3.5" />
+                            {label}
+                        </NavLink>
+                    ))}
+                </nav>
 
-                <div className="flex items-center gap-3">
-                    {/* Выпадающее меню уведомлений вместо старой кнопки */}
-                    <NotificationsPopover />
-
-                    <div className="hidden sm:flex flex-col items-end text-xs mr-1">
-                        <span className="font-medium text-scoutly-dark">{user.email}</span>
-                        <span className="text-scoutly-accent font-medium">
-              {user.role === 'Employer' ? 'Работодатель' : 'Соискатель'}
-            </span>
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={logout}
-                        className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-scoutly-muted hover:text-status-danger hover:border-status-danger/40 transition-colors cursor-pointer"
-                    >
-                        <LogOut className="h-3.5 w-3.5" />
-                        <span>Выйти</span>
-                    </button>
-                </div>
+                <Link
+                    to="/auth"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-xs font-semibold text-slate-700 transition-colors shrink-0"
+                    title="Переключить активный профиль или компанию"
+                >
+                    <span>Профиль #{activeProfileId}</span>
+                    <span className="text-slate-300">|</span>
+                    <span>Компания #{activeCompanyId}</span>
+                    <RefreshCw className="w-3 h-3 text-[#1F4E79]" />
+                </Link>
             </div>
         </header>
     );

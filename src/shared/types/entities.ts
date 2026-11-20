@@ -1,43 +1,38 @@
 export type UserRole = 'Applicant' | 'Employer' | 'Recruiter' | 'Admin';
 
-export interface AuthResponse {
-    accessToken: string;
-    refreshToken: string;
-    user: {
-        id: string;
-        email: string;
-        role: UserRole;
-    };
-}
-
-export interface Skill {
+export interface VacancyListItem {
     id: number;
-    name: string;
-    categoryId: number;
+    companyName: string;
+    title: string;
+    city?: string | null;
+    workFormat: string;
+    salaryMin?: number | null;
+    salaryMax?: number | null;
+    requiredSkills: string[];
+    createdAt: string;
 }
 
-export interface Vacancy {
-    id: string;
-    companyId: string;
-    companyName?: string;
+export interface VacancyDetails extends VacancyListItem {
+    companyId: number;
+    description: string;
+    status: string;
+}
+
+export interface CreateVacancyRequest {
+    companyId: number;
     title: string;
     description: string;
-    minSalary?: number;
-    maxSalary?: number;
-    targetGrade: string;
-    status: 'Active' | 'Paused' | 'Archived';
-    createdAt: string;
-    skills: {
-        skillId: number;
-        skillName: string;
-        isRequired: boolean;
-    }[];
+    city?: string | null;
+    workFormat: string;
+    salaryMin?: number | null;
+    salaryMax?: number | null;
+    skillIds: number[];
 }
 
 export interface Application {
     id: string;
     candidateId: string;
-    vacancyId: string;
+    vacancyId: number;
     vacancyTitle?: string;
     companyName?: string;
     coverLetter?: string;

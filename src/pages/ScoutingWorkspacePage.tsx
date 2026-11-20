@@ -1,341 +1,620 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Sparkles, Search, MessageSquarePlus, CheckCircle2, Layers } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+    Sparkles,
+    UserPlus,
+    CheckCircle2,
+    XCircle,
+    History,
+    MapPin,
+    Wallet,
+    ArrowRight,
+    SlidersHorizontal,
+} from 'lucide-react';
+import { useVacanciesQuery } from '../features/vacancies/api/vacanciesApi';
+import {
+    useAutoMatchQuery,
+    useMatchScoreQuery,
+    useAddToPipelineMutation,
+    useChangeStageMutation,
+    useCandidateHistoryQuery,
+    type RankedCandidateResponse,
+    type RecruiterCandidateResponse,
+} from '../features/scouting/api/scoutingApi';
 import { Button } from '../shared/ui/Button';
 
-type FunnelStage = 'Скрининг' | 'Первичный контакт' | 'Техническое интервью' | 'Оффер';
-
-interface ScoutedCandidate {
-    id: string;
+interface PipelineCard extends RecruiterCandidateResponse {
     fullName: string;
-    position: string;
-    grade: string;
-    city: string;
-    expectedSalary: string;
-    matchScore: number;
-    matchedSkills: string[];
-    missingSkills: string[];
-    stage: FunnelStage;
-    history: { date: string; event: string; note: string }[];
+    headline: string | null;
 }
 
-const STAGES: FunnelStage[] = [
-    'Скрининг',
-    'Первичный контакт',
-    'Техническое интервью',
-    'Оффер',
+const PIPELINE_STAGES = [
+    { key: 'New', label: 'Новый' },
+    { key: 'Contacted', label: 'Контакт' },
+    { key: 'Screening', label: 'Скрининг' },
+    { key: 'Interview', label: 'Интервью' },
+    { key: 'Offer', label: 'Оффер' },
+    { key: 'Rejected', label: 'Отказ' },
 ];
 
-const INITIAL_CANDIDATES: ScoutedCandidate[] = [
-    {
-        id: 'sc1',
-        fullName: 'Алексей Киреев',
-        position: 'Backend-разработчик (C# / .NET)',
-        grade: 'Middle',
-        city: 'Новосибирск',
-        expectedSalary: '180 000 ₽',
-        matchScore: 97,
-        matchedSkills: ['C#', 'ASP.NET Core', 'PostgreSQL', 'Docker', 'Git'],
-        missingSkills: [],
-        stage: 'Техническое интервью',
-        history: [
-            {
-                date: '18.11.2026 14:20',
-                event: 'Перевод на этап «Техническое интервью»',
-                note: 'Отличные знания Vertical Slice Architecture и асинхронности в .NET.',
-            },
-            {
-                date: '16.11.2026 11:05',
-                event: 'Автоматический скоринг',
-                note: 'Кандидат найден модулем скаутинга (совпадение 97%).',
-            },
-        ],
-    },
-    {
-        id: 'sc2',
-        fullName: 'Максим Волков',
-        position: '.NET Backend Engineer',
-        grade: 'Middle',
-        city: 'Москва',
-        expectedSalary: '210 000 ₽',
-        matchScore: 88,
-        matchedSkills: ['C#', 'ASP.NET Core', 'PostgreSQL'],
-        missingSkills: ['Docker'],
-        stage: 'Первичный контакт',
-        history: [
-            {
-                date: '17.11.2026 16:40',
-                event: 'Первичный контакт',
-                note: 'Отправлено приглашение в Telegram, ожидаем ответ по времени созвона.',
-            },
-        ],
-    },
-    {
-        id: 'sc3',
-        fullName: 'Анна Лебедева',
-        position: 'Fullstack C# / React Developer',
-        grade: 'Middle',
-        city: 'Санкт-Петербург',
-        expectedSalary: '195 000 ₽',
-        matchScore: 82,
-        matchedSkills: ['C#', 'PostgreSQL', 'Git'],
-        missingSkills: ['ASP.NET Core', 'Docker'],
-        stage: 'Скрининг',
-        history: [
-            {
-                date: '18.11.2026 09:15',
-                event: 'Добавлена в воронку',
-                note: 'Сильный бэкграунд в смежном стеке.',
-            },
-        ],
-    },
-];
+const RECRUITER_USER_ID = 1;
+const STORAGE_KEY = 'scoutly_pipeline_cards_v1';
 
 export function ScoutingWorkspacePage() {
-    const [candidates, setCandidates] = useState<ScoutedCandidate[]>(INITIAL_CANDIDATES);
-    const [selectedId, setSelectedId] = useState<string>('sc1');
-    const [skillFilter, setSkillFilter] = useState('');
-    const [noteInput, setNoteInput] = useState('');
-    const [isScoring, setIsScoring] = useState(false);
+    const { data: vacancies = [], isLoading: isVacanciesLoading } =
+        useVacanciesQuery();
 
-    const selected = candidates.find((c) => c.id === selectedId) || candidates[0];
+    const [selectedVacancyId, setSelectedVacancyId] = useState<number | null>(
+        null
+    );
+    const [minScoreFilter, setMinScoreFilter] = useState<number>(0);
 
-    const filteredCandidates = candidates.filter(
-        (c) =>
-            c.fullName.toLowerCase().includes(skillFilter.toLowerCase()) ||
-            c.matchedSkills.some((s) => s.toLowerCase().includes(skillFilter.toLowerCase()))
+    // Выбранный кандидат для детального скоринга (match-score)
+    const [inspectCandidate, setInspectCandidate] =
+        useState<RankedCandidateResponse | null>(null);
+
+    // Кандидат в воронке, для которого открыт журнал истории (history/{id})
+    const [activeHistoryCard, setActiveHistoryCard] =
+        useState<PipelineCard | null>(null);
+    const [stageComment, setStageComment] = useState('');
+
+    // Локальное хранилище добавленных карточек воронки (т.к. на бэкенде нет GET /scouting/pipeline)
+    const [pipelineCards, setPipelineCards] = useState<PipelineCard[]>(() => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch {
+            return [];
+        }
+    });
+
+    useEffect(() => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(pipelineCards));
+    }, [pipelineCards]);
+
+    useEffect(() => {
+        if (selectedVacancyId === null && vacancies.length > 0) {
+            setSelectedVacancyId(vacancies[0].id);
+        }
+    }, [vacancies, selectedVacancyId]);
+
+    const {
+        data: rankedCandidates = [],
+        isLoading: isMatching,
+        isError: isMatchError,
+    } = useAutoMatchQuery(selectedVacancyId);
+
+    const { data: matchScoreDetails, isLoading: isScoreLoading } =
+        useMatchScoreQuery(
+            selectedVacancyId,
+            inspectCandidate?.specialistProfileId ?? null
+        );
+
+    const { data: historyEntries = [], isLoading: isHistoryLoading } =
+        useCandidateHistoryQuery(activeHistoryCard?.id ?? null);
+
+    const addToPipelineMutation = useAddToPipelineMutation();
+    const changeStageMutation = useChangeStageMutation();
+
+    const filteredCandidates = useMemo(
+        () =>
+            rankedCandidates.filter((c) => Number(c.matchScore) >= minScoreFilter),
+        [rankedCandidates, minScoreFilter]
     );
 
-    const handleStageChange = (stage: FunnelStage) => {
-        setCandidates((prev) =>
-            prev.map((c) =>
-                c.id === selected.id
-                    ? {
-                        ...c,
-                        stage,
-                        history: [
-                            {
-                                date: '18.11.2026 Сейчас',
-                                event: `Смена этапа на «${stage}»`,
-                                note: 'Статус обновлен рекрутером в панели скаутинга.',
-                            },
-                            ...c.history,
-                        ],
-                    }
-                    : c
-            )
+    const currentVacancyPipeline = useMemo(
+        () => pipelineCards.filter((c) => c.vacancyId === selectedVacancyId),
+        [pipelineCards, selectedVacancyId]
+    );
+
+    const handleAddToPipeline = async (candidate: RankedCandidateResponse) => {
+        if (!selectedVacancyId) return;
+
+        const alreadyAdded = currentVacancyPipeline.some(
+            (c) => c.specialistProfileId === candidate.specialistProfileId
         );
+        if (alreadyAdded) return;
+
+        try {
+            const created = await addToPipelineMutation.mutateAsync({
+                recruiterUserId: RECRUITER_USER_ID,
+                specialistProfileId: candidate.specialistProfileId,
+                vacancyId: selectedVacancyId,
+            });
+
+            const newCard: PipelineCard = {
+                ...created,
+                fullName: candidate.fullName,
+                headline: candidate.headline,
+            };
+
+            setPipelineCards((prev) => [newCard, ...prev]);
+            setActiveHistoryCard(newCard);
+        } catch (err) {
+            console.error('Ошибка добавления в воронку:', err);
+            alert('Не удалось добавить кандидата в воронку. Проверьте ID рекрутера в БД.');
+        }
     };
 
-    const handleAddNote = () => {
-        if (!noteInput.trim()) return;
-        setCandidates((prev) =>
-            prev.map((c) =>
-                c.id === selected.id
-                    ? {
-                        ...c,
-                        history: [
-                            {
-                                date: '18.11.2026 Сейчас',
-                                event: 'Заметка рекрутера',
-                                note: noteInput.trim(),
-                            },
-                            ...c.history,
-                        ],
-                    }
-                    : c
-            )
-        );
-        setNoteInput('');
-    };
+    const handleChangeStage = async (
+        card: PipelineCard,
+        newStage: string,
+        comment?: string
+    ) => {
+        try {
+            await changeStageMutation.mutateAsync({
+                recruiterCandidateId: card.id,
+                recruiterUserId: RECRUITER_USER_ID,
+                newStage,
+                comment: comment || null,
+            });
 
-    const runAutoScoring = () => {
-        setIsScoring(true);
-        setTimeout(() => setIsScoring(false), 600);
+            setPipelineCards((prev) =>
+                prev.map((item) =>
+                    item.id === card.id ? { ...item, stage: newStage } : item
+                )
+            );
+
+            if (activeHistoryCard?.id === card.id) {
+                setActiveHistoryCard({ ...card, stage: newStage });
+            }
+            setStageComment('');
+        } catch (err) {
+            console.error('Ошибка смены этапа:', err);
+            alert('Сервер отклонил смену этапа. Проверьте допустимые значения CandidateStages.');
+        }
     };
 
     return (
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+            {/* Шапка и выбор вакансии */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div>
-                    <h1 className="text-2xl font-bold text-scoutly-dark">Модуль скаутинга и скоринга</h1>
-                    <p className="text-sm text-scoutly-muted mt-0.5">
-                        Вакансия: <span className="font-semibold text-scoutly-primary">Backend-разработчик (C# / .NET 9)</span>
-                    </p>
+                    <div className="flex items-center gap-2 text-[#1F4E79] font-semibold text-sm mb-1">
+                        <Sparkles className="w-4 h-4 text-[#A80036]" />
+                        <span>Интеллектуальный скаутинг и скоринг</span>
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        Автоподбор кандидатов
+                    </h1>
                 </div>
 
-                <Button variant="action" isLoading={isScoring} onClick={runAutoScoring}>
-                    <Sparkles className="h-4 w-4" />
-                    <span>Запустить автоподбор (Скоринг)</span>
-                </Button>
-            </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="flex flex-col">
+                        <label className="text-xs font-medium text-slate-500 mb-1">
+                            Целевая вакансия
+                        </label>
+                        <select
+                            value={selectedVacancyId ?? ''}
+                            onChange={(e) => {
+                                setSelectedVacancyId(Number(e.target.value));
+                                setInspectCandidate(null);
+                            }}
+                            disabled={isVacanciesLoading || vacancies.length === 0}
+                            className="min-w-[260px] rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-800 focus:border-[#1F4E79] focus:outline-none"
+                        >
+                            {vacancies.length === 0 && (
+                                <option value="">Нет активных вакансий</option>
+                            )}
+                            {vacancies.map((v) => (
+                                <option key={v.id} value={v.id}>
+                                    #{v.id} — {v.title} ({v.companyName})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
-            {/* Трехпанельная компоновка Master-Detail (п. 3.2.1) */}
-            <div className="grid lg:grid-cols-12 gap-5 items-start">
-                {/* Левая и центральная колонки: Фильтр и ранжированный список (5 колонок) */}
-                <div className="lg:col-span-5 space-y-3">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-scoutly-muted" />
+                    <div className="flex flex-col">
+                        <label className="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
+                            <SlidersHorizontal className="w-3 h-3" />
+                            Мин. скоринг: {minScoreFilter}%
+                        </label>
                         <input
-                            type="text"
-                            value={skillFilter}
-                            onChange={(e) => setSkillFilter(e.target.value)}
-                            placeholder="Фильтр по ФИО или технологии..."
-                            className="w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-scoutly-accent"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={10}
+                            value={minScoreFilter}
+                            onChange={(e) => setMinScoreFilter(Number(e.target.value))}
+                            className="h-9 accent-[#1F4E79] cursor-pointer"
                         />
                     </div>
-
-                    {filteredCandidates.map((cand) => {
-                        const isSelected = cand.id === selected.id;
-                        return (
-                            <motion.div
-                                key={cand.id}
-                                whileHover={{ x: 2 }}
-                                onClick={() => setSelectedId(cand.id)}
-                                className={`rounded-lg p-4 border cursor-pointer transition-all ${
-                                    isSelected
-                                        ? 'bg-white border-scoutly-primary shadow-md ring-1 ring-scoutly-primary/20'
-                                        : 'bg-white border-gray-100 shadow-xs hover:border-gray-300'
-                                }`}
-                            >
-                                <div className="flex items-start justify-between gap-2">
-                                    <div>
-                                        <div className="font-bold text-sm text-scoutly-dark">{cand.fullName}</div>
-                                        <div className="text-xs text-scoutly-muted mt-0.5">{cand.position}</div>
-                                    </div>
-                                    <span className="rounded-md bg-status-success/15 text-status-success px-2.5 py-1 text-xs font-bold shrink-0">
-                    {cand.matchScore}% match
-                  </span>
-                                </div>
-
-                                <div className="mt-3 flex items-center justify-between text-xs">
-                  <span className="text-scoutly-muted">
-                    {cand.city} • {cand.expectedSalary}
-                  </span>
-                                    <span className="rounded-md bg-scoutly-primary/10 text-scoutly-primary px-2 py-0.5 font-semibold">
-                    {cand.stage}
-                  </span>
-                                </div>
-                            </motion.div>
-                        );
-                    })}
                 </div>
+            </div>
 
-                {/* Правая колонка: Детальная карточка, скоринг, воронка и аудит-лог (7 колонок) */}
-                <div className="lg:col-span-7 rounded-lg bg-white p-6 border border-gray-100 shadow-xs space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-100">
-                        <div>
-                            <div className="flex items-center gap-2.5">
-                                <h2 className="text-xl font-bold text-scoutly-dark">{selected.fullName}</h2>
-                                <span className="rounded-md bg-scoutly-bg px-2.5 py-0.5 text-xs font-semibold text-scoutly-primary">
-                  {selected.grade}
-                </span>
-                            </div>
-                            <p className="text-xs text-scoutly-muted mt-1">
-                                {selected.position} • {selected.city} • Ожидания: {selected.expectedSalary}
-                            </p>
-                        </div>
-
-                        <div className="text-right">
-                            <div className="text-2xl font-bold text-status-success">{selected.matchScore}%</div>
-                            <div className="text-[11px] text-scoutly-muted">Итоговый скоринг</div>
-                        </div>
+            {/* Основная сетка: Ранжированная выдача слева + Детали скоринга/Истории справа */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Левая колонка (2/3): Список кандидатов из AutoMatch */}
+                <div className="lg:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-semibold text-slate-900">
+                            Релевантные специалисты ({filteredCandidates.length})
+                        </h2>
+                        {selectedVacancyId && (
+                            <span className="text-xs text-slate-500">
+                GET /api/scouting/auto-match/{selectedVacancyId}
+              </span>
+                        )}
                     </div>
 
-                    {/* Детализация совпадений (US-17) */}
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        <div className="rounded-lg bg-status-success/8 border border-status-success/20 p-3.5">
-                            <div className="text-xs font-semibold text-status-success mb-2 flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                <span>Покрытые обязательные навыки</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {selected.matchedSkills.map((s) => (
-                                    <span key={s} className="rounded bg-white px-2 py-0.5 text-xs font-medium text-scoutly-dark shadow-2xs">
-                    {s}
-                  </span>
-                                ))}
-                            </div>
+                    {isMatching ? (
+                        <div className="space-y-3">
+                            {[1, 2, 3].map((i) => (
+                                <div
+                                    key={i}
+                                    className="h-32 rounded-2xl bg-slate-200/70 animate-pulse"
+                                />
+                            ))}
                         </div>
+                    ) : isMatchError ? (
+                        <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                            Не удалось загрузить подборку кандидатов для выбранной вакансии.
+                        </div>
+                    ) : filteredCandidates.length === 0 ? (
+                        <div className="p-10 text-center bg-white rounded-2xl border border-slate-200 text-slate-500">
+                            По выбранным критериям кандидаты не найдены. Попробуйте снизить порог скоринга или проверьте наличие профилей в таблице{' '}
+                            <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">
+                                specialist_profiles
+                            </code>
+                            .
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {filteredCandidates.map((candidate) => {
+                                const inPipeline = currentVacancyPipeline.some(
+                                    (c) =>
+                                        c.specialistProfileId === candidate.specialistProfileId
+                                );
+                                const score = Number(candidate.matchScore);
+                                const badgeColor =
+                                    score >= 75
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : score >= 40
+                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                            : 'bg-slate-100 text-slate-600 border-slate-200';
 
-                        <div className="rounded-lg bg-scoutly-bg border border-gray-200/80 p-3.5">
-                            <div className="text-xs font-semibold text-scoutly-muted mb-2">
-                                Дефицитные компетенции
+                                return (
+                                    <div
+                                        key={candidate.specialistProfileId}
+                                        className={`bg-white p-5 rounded-2xl border transition-all ${
+                                            inspectCandidate?.specialistProfileId ===
+                                            candidate.specialistProfileId
+                                                ? 'border-[#1F4E79] ring-2 ring-[#1F4E79]/10'
+                                                : 'border-slate-200 hover:border-slate-300'
+                                        }`}
+                                    >
+                                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center gap-2.5 flex-wrap">
+                                                    <h3 className="text-base font-bold text-slate-900">
+                                                        {candidate.fullName ||
+                                                            `Специалист #${candidate.specialistProfileId}`}
+                                                    </h3>
+                                                    <span
+                                                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeColor}`}
+                                                    >
+                            Совпадение: {score}%
+                          </span>
+                                                </div>
+
+                                                {candidate.headline && (
+                                                    <p className="text-sm font-medium text-[#1F4E79]">
+                                                        {candidate.headline}
+                                                    </p>
+                                                )}
+
+                                                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
+                                                    {candidate.city && (
+                                                        <span className="flex items-center gap-1">
+                              <MapPin className="w-3.5 h-3.5" />
+                                                            {candidate.city}
+                            </span>
+                                                    )}
+                                                    {candidate.expectedSalary && (
+                                                        <span className="flex items-center gap-1">
+                              <Wallet className="w-3.5 h-3.5" />
+                              от {candidate.expectedSalary.toLocaleString('ru-RU')} ₽
+                            </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setInspectCandidate(candidate)}
+                                                >
+                                                    Разбор скоринга
+                                                </Button>
+
+                                                <Button
+                                                    size="sm"
+                                                    disabled={
+                                                        inPipeline || addToPipelineMutation.isPending
+                                                    }
+                                                    onClick={() => handleAddToPipeline(candidate)}
+                                                >
+                                                    {inPipeline ? (
+                                                        <>
+                                                            <CheckCircle2 className="w-4 h-4 mr-1.5" />В воронке
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <UserPlus className="w-4 h-4 mr-1.5" />В воронку
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {candidate.matchedSkills.length > 0 && (
+                                            <div className="flex flex-wrap gap-1.5 mt-4 pt-3 border-t border-slate-100">
+                                                {candidate.matchedSkills.map((skill) => (
+                                                    <span
+                                                        key={skill}
+                                                        className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-[#1F4E79]/10 text-[#1F4E79]"
+                                                    >
+                            {skill}
+                          </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Правая колонка (1/3): Панель детального скоринга (CalculateMatchScoreQuery) */}
+                <div className="space-y-4">
+                    <h2 className="text-lg font-semibold text-slate-900">
+                        Детализация скоринга
+                    </h2>
+
+                    {!inspectCandidate ? (
+                        <div className="p-6 bg-white rounded-2xl border border-dashed border-slate-300 text-sm text-slate-500 text-center">
+                            Нажмите <strong>«Разбор скоринга»</strong> на карточке любого кандидата, чтобы проверить обязательные навыки и веса компетенций.
+                        </div>
+                    ) : isScoreLoading ? (
+                        <div className="h-48 rounded-2xl bg-slate-200/70 animate-pulse" />
+                    ) : matchScoreDetails ? (
+                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                            <div>
+                                <div className="text-xs text-slate-500">Кандидат</div>
+                                <div className="font-bold text-slate-900">
+                                    {inspectCandidate.fullName}
+                                </div>
                             </div>
-                            {selected.missingSkills.length === 0 ? (
-                                <span className="text-xs text-status-success font-medium">
-                  Полное покрытие требований вакансии
+
+                            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                                <span className="text-sm text-slate-600">Итоговый балл</span>
+                                <span className="text-xl font-extrabold text-[#1F4E79]">
+                  {matchScoreDetails.matchPercentage}%
                 </span>
-                            ) : (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {selected.missingSkills.map((s) => (
-                                        <span key={s} className="rounded bg-status-danger/10 text-status-danger px-2 py-0.5 text-xs font-medium">
-                      {s}
-                    </span>
-                                    ))}
+                            </div>
+
+                            <div className="flex items-center gap-2 text-sm">
+                                {matchScoreDetails.passedMandatorySkills ? (
+                                    <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Обязательные навыки пройдены
+                  </span>
+                                ) : (
+                                    <span className="flex items-center gap-1.5 text-[#A80036] font-medium">
+                    <XCircle className="w-4 h-4" />
+                    Не хватает обязательных навыков
+                  </span>
+                                )}
+                            </div>
+
+                            {matchScoreDetails.matchedSkills.length > 0 && (
+                                <div>
+                                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                                        Подтверждённые навыки
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {matchScoreDetails.matchedSkills.map((s) => (
+                                            <span
+                                                key={s}
+                                                className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium"
+                                            >
+                        {s}
+                      </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {matchScoreDetails.missingRequiredSkills.length > 0 && (
+                                <div>
+                                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                                        Отсутствуют (обязательные)
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {matchScoreDetails.missingRequiredSkills.map((s) => (
+                                            <span
+                                                key={s}
+                                                className="px-2 py-0.5 rounded bg-rose-50 text-[#A80036] border border-rose-200 text-xs font-medium"
+                                            >
+                        {s}
+                      </span>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>
-                    </div>
+                    ) : null}
+                </div>
+            </div>
 
-                    {/* Управление этапом воронки (US-18) */}
+            {/* Секция воронки рекрутера и истории взаимодействий */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+                <div className="flex items-center justify-between">
                     <div>
-                        <label className="block text-xs font-semibold text-scoutly-dark mb-2 flex items-center gap-1.5">
-                            <Layers className="h-3.5 w-3.5 text-scoutly-accent" />
-                            <span>Этап воронки подбора</span>
-                        </label>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {STAGES.map((st) => (
-                                <button
-                                    key={st}
-                                    type="button"
-                                    onClick={() => handleStageChange(st)}
-                                    className={`py-2 px-2.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                        selected.stage === st
-                                            ? 'bg-scoutly-primary text-white border-scoutly-primary shadow-xs'
-                                            : 'bg-white text-scoutly-muted border-gray-200 hover:border-scoutly-accent'
+                        <h2 className="text-lg font-bold text-slate-900">
+                            Воронка рекрутера по вакансии ({currentVacancyPipeline.length})
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                            Управление этапами (POST /api/scouting/change-stage) и журнал событий
+                        </p>
+                    </div>
+                </div>
+
+                {currentVacancyPipeline.length === 0 ? (
+                    <div className="text-sm text-slate-500 py-6 text-center bg-slate-50 rounded-xl">
+                        Воронка по этой вакансии пока пуста. Добавьте кандидатов из списка выше кнопкой{' '}
+                        <strong>«В воронку»</strong>.
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Карточки в воронке */}
+                        <div className="lg:col-span-2 space-y-3">
+                            {currentVacancyPipeline.map((card) => (
+                                <div
+                                    key={card.id}
+                                    className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                                        activeHistoryCard?.id === card.id
+                                            ? 'border-[#1F4E79] bg-[#1F4E79]/[0.02]'
+                                            : 'border-slate-200'
                                     }`}
                                 >
-                                    {st}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* История взаимодействия (US-19) */}
-                    <div className="space-y-3 pt-2 border-t border-gray-100">
-                        <h3 className="text-xs font-bold text-scoutly-dark uppercase tracking-wider">
-                            История взаимодействия (Audit Log)
-                        </h3>
-
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={noteInput}
-                                onChange={(e) => setNoteInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddNote()}
-                                placeholder="Добавить протокол звонка или заметку по кандидату..."
-                                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs outline-none focus:border-scoutly-accent"
-                            />
-                            <Button type="button" variant="secondary" className="py-2 px-3 text-xs" onClick={handleAddNote}>
-                                <MessageSquarePlus className="h-3.5 w-3.5" />
-                                <span>Записать</span>
-                            </Button>
-                        </div>
-
-                        <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-                            {selected.history.map((h, idx) => (
-                                <div key={idx} className="rounded-lg bg-scoutly-bg p-3 text-xs space-y-1">
-                                    <div className="flex items-center justify-between text-[11px]">
-                                        <span className="font-semibold text-scoutly-primary">{h.event}</span>
-                                        <span className="text-scoutly-muted">{h.date}</span>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900">
+                        {card.fullName}
+                      </span>
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">
+                        Запись #{card.id}
+                      </span>
+                                            {card.matchScore !== null && (
+                                                <span className="text-xs font-semibold text-[#1F4E79]">
+                          {card.matchScore}%
+                        </span>
+                                            )}
+                                        </div>
+                                        {card.headline && (
+                                            <div className="text-xs text-slate-500 mt-0.5">
+                                                {card.headline}
+                                            </div>
+                                        )}
                                     </div>
-                                    <p className="text-scoutly-dark/85">{h.note}</p>
+
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <select
+                                            value={card.stage}
+                                            onChange={(e) => handleChangeStage(card, e.target.value)}
+                                            disabled={changeStageMutation.isPending}
+                                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-[#1F4E79] focus:outline-none"
+                                        >
+                                            {PIPELINE_STAGES.map((st) => (
+                                                <option key={st.key} value={st.key}>
+                                                    {st.label} ({st.key})
+                                                </option>
+                                            ))}
+                                        </select>
+
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setActiveHistoryCard(card)}
+                                        >
+                                            <History className="w-3.5 h-3.5 mr-1" />
+                                            История
+                                        </Button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
+
+                        {/* Журнал истории (GetCandidateHistoryQuery) */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                                    <History className="w-4 h-4 text-[#1F4E79]" />
+                                    История взаимодействий
+                                </h3>
+                                {activeHistoryCard && (
+                                    <span className="text-xs text-slate-500">
+                    #{activeHistoryCard.id}
+                  </span>
+                                )}
+                            </div>
+
+                            {!activeHistoryCard ? (
+                                <p className="text-xs text-slate-500">
+                                    Выберите карточку кандидата в воронке, чтобы просмотреть или дополнить журнал событий.
+                                </p>
+                            ) : (
+                                <>
+                                    {/* Быстрый комментарий со сменой/подтверждением этапа */}
+                                    <div className="space-y-2">
+                    <textarea
+                        rows={2}
+                        value={stageComment}
+                        onChange={(e) => setStageComment(e.target.value)}
+                        placeholder="Добавить заметку в историю (например: созвон в 15:00)..."
+                        className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs focus:border-[#1F4E79] focus:outline-none"
+                    />
+                                        <Button
+                                            size="sm"
+                                            className="w-full"
+                                            disabled={
+                                                !stageComment.trim() || changeStageMutation.isPending
+                                            }
+                                            onClick={() =>
+                                                handleChangeStage(
+                                                    activeHistoryCard,
+                                                    activeHistoryCard.stage,
+                                                    stageComment
+                                                )
+                                            }
+                                        >
+                                            Сохранить заметку
+                                            <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                                        </Button>
+                                    </div>
+
+                                    {isHistoryLoading ? (
+                                        <div className="text-xs text-slate-400">
+                                            Загрузка журнала...
+                                        </div>
+                                    ) : historyEntries.length === 0 ? (
+                                        <div className="text-xs text-slate-400">
+                                            Записей пока нет.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                                            {historyEntries.map((entry) => (
+                                                <div
+                                                    key={entry.id}
+                                                    className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs space-y-1"
+                                                >
+                                                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                            <span className="font-semibold text-[#1F4E79]">
+                              {entry.actionType}
+                            </span>
+                                                        <span>
+                              {new Date(entry.createdAt).toLocaleString('ru-RU', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                              })}
+                            </span>
+                                                    </div>
+                                                    <p className="text-slate-700 leading-relaxed">
+                                                        {entry.notes}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );

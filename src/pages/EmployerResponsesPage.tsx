@@ -1,132 +1,183 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { UserCheck, XCircle, Sparkles } from 'lucide-react';
-import { Button } from '../shared/ui/Button';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+    Inbox,
+    User,
+    MapPin,
+    Briefcase,
+    Clock,
+} from 'lucide-react';
+import { api } from '../shared/api/axiosInstance';
 
-interface IncomingResponse {
-    id: string;
-    candidateName: string;
-    grade: string;
+interface IncomingApplicationResponse {
+    id: number;
+    vacancyId: number;
     vacancyTitle: string;
-    matchScore: number;
-    skills: string[];
-    status: 'New' | 'Interview' | 'Rejected';
+    specialistProfileId: number;
+    candidateFullName: string;
+    candidateHeadline: string | null;
+    candidateCity: string | null;
+    status: string;
+    coverLetter: string | null;
+    appliedAt: string;
 }
 
-const INITIAL_RESPONSES: IncomingResponse[] = [
-    {
-        id: 'r1',
-        candidateName: 'Алексей Киреев',
-        grade: 'Middle',
-        vacancyTitle: 'Backend-разработчик (C# / .NET 9)',
-        matchScore: 96,
-        skills: ['C#', 'ASP.NET Core', 'PostgreSQL', 'Docker'],
-        status: 'New',
-    },
-    {
-        id: 'r2',
-        candidateName: 'Дмитрий Соколов',
-        grade: 'Middle',
-        vacancyTitle: 'Backend-разработчик (C# / .NET 9)',
-        matchScore: 84,
-        skills: ['C#', 'Entity Framework', 'MS SQL'],
-        status: 'Interview',
-    },
-    {
-        id: 'r3',
-        candidateName: 'Елена Морозова',
-        grade: 'Middle',
-        vacancyTitle: 'Frontend-разработчик (React + TypeScript)',
-        matchScore: 92,
-        skills: ['React', 'TypeScript', 'Tailwind CSS'],
-        status: 'New',
-    },
+const APPLICATION_STATUSES = [
+    { key: 'Pending', label: 'Новый отклик' },
+    { key: 'Reviewed', label: 'Просмотрено' },
+    { key: 'Interview', label: 'Интервью' },
+    { key: 'Accepted', label: 'Оффер / Принят' },
+    { key: 'Rejected', label: 'Отказ' },
 ];
 
 export function EmployerResponsesPage() {
-    const [responses, setResponses] = useState(INITIAL_RESPONSES);
+    const queryClient = useQueryClient();
+    const [companyId] = useState<number>(() => {
+        const saved = localStorage.getItem('scoutly_company_id');
+        return saved ? Number(saved) : 1;
+    });
 
-    const updateStatus = (id: string, status: IncomingResponse['status']) => {
-        setResponses((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
-    };
+    const {
+        data: responses = [],
+        isLoading,
+        isError,
+    } = useQuery({
+        queryKey: ['applications', 'incoming', companyId],
+        queryFn: async () => {
+            const { data } = await api.get<IncomingApplicationResponse[]>(
+                '/applications/incoming',
+                { params: { companyId } }
+            );
+            return data;
+        },
+    });
+
+    const statusMutation = useMutation({
+        mutationFn: async ({ id, status }: { id: number; status: string }) => {
+            await api.patch(`/applications/${id}/status`, {
+                applicationId: id,
+                status,
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['applications'] });
+        },
+    });
 
     return (
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8">
-            <div className="mb-8">
-                <h1 className="text-2xl font-bold text-scoutly-dark">Входящие отклики кандидатов</h1>
-                <p className="text-sm text-scoutly-muted mt-1">
-                    Автоматическая оценка релевантности (MatchScore) и управление статусами рассмотрения
-                </p>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2.5">
+                        <Inbox className="w-6 h-6 text-[#1F4E79]" />
+                        Входящие отклики
+                    </h1>
+                    <p className="text-sm text-slate-500 mt-1">
+                        Резюме кандидатов, откликнувшихся на вакансии компании #{companyId}
+                    </p>
+                </div>
+
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#1F4E79]/10 text-[#1F4E79]">
+          Всего: {responses.length}
+        </span>
             </div>
 
-            <div className="space-y-4">
-                {responses.map((item) => (
-                    <motion.div
-                        key={item.id}
-                        layout
-                        className="rounded-lg bg-white p-6 border border-gray-100 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                    >
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-3 flex-wrap">
-                                <h3 className="text-base font-bold text-scoutly-dark">{item.candidateName}</h3>
-                                <span className="rounded-md bg-scoutly-bg px-2.5 py-0.5 text-xs font-semibold text-scoutly-primary">
-                  {item.grade}
-                </span>
-                                <span className="inline-flex items-center gap-1 rounded-md bg-status-success/15 text-status-success px-2.5 py-0.5 text-xs font-bold">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Совпадение: {item.matchScore}%
-                </span>
-                            </div>
-                            <div className="text-xs text-scoutly-muted">
-                                Вакансия: <span className="font-medium text-scoutly-dark">{item.vacancyTitle}</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                                {item.skills.map((s) => (
-                                    <span
-                                        key={s}
-                                        className="rounded-md bg-scoutly-primary/8 text-scoutly-primary px-2 py-0.5 text-xs font-medium"
-                                    >
-                    {s}
-                  </span>
-                                ))}
-                            </div>
-                        </div>
+            {isLoading ? (
+                <div className="space-y-3">
+                    {[1, 2].map((i) => (
+                        <div
+                            key={i}
+                            className="h-32 rounded-2xl bg-slate-200/70 animate-pulse"
+                        />
+                    ))}
+                </div>
+            ) : isError ? (
+                <div className="p-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                    Эндпоинт <code>GET /api/applications/incoming</code> ещё не добавлен в{' '}
+                    <code>ApplicationsController.cs</code> или бэкенд не перезапущен.
+                </div>
+            ) : responses.length === 0 ? (
+                <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500 text-sm">
+                    На вакансии компании #{companyId} пока нет входящих откликов.
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {responses.map((item) => (
+                        <div
+                            key={item.id}
+                            className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4"
+                        >
+                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-[#1F4E79]">
+                                        <Briefcase className="w-3.5 h-3.5" />
+                                        Вакансия: {item.vacancyTitle} (#{item.vacancyId})
+                                    </div>
 
-                        <div className="flex items-center gap-2.5 shrink-0">
-                            {item.status === 'New' ? (
-                                <>
-                                    <Button
-                                        variant="primary"
-                                        className="py-2 px-3.5 text-xs"
-                                        onClick={() => updateStatus(item.id, 'Interview')}
+                                    <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                        <User className="w-4 h-4 text-slate-400" />
+                                        {item.candidateFullName ||
+                                            `Специалист #${item.specialistProfileId}`}
+                                    </h2>
+
+                                    {item.candidateHeadline && (
+                                        <p className="text-sm text-slate-700">
+                                            {item.candidateHeadline}
+                                        </p>
+                                    )}
+
+                                    <div className="flex items-center gap-4 text-xs text-slate-500 pt-1">
+                                        {item.candidateCity && (
+                                            <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5" />
+                                                {item.candidateCity}
+                      </span>
+                                        )}
+                                        <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                                            {new Date(item.appliedAt).toLocaleString('ru-RU', {
+                                                day: '2-digit',
+                                                month: 'short',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}
+                    </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <select
+                                        value={item.status}
+                                        disabled={statusMutation.isPending}
+                                        onChange={(e) =>
+                                            statusMutation.mutate({
+                                                id: item.id,
+                                                status: e.target.value,
+                                            })
+                                        }
+                                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 focus:border-[#1F4E79] focus:outline-none"
                                     >
-                                        <UserCheck className="h-4 w-4" />
-                                        <span>Пригласить на интервью</span>
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        className="py-2 px-3 text-xs text-status-danger hover:bg-status-danger/10"
-                                        onClick={() => updateStatus(item.id, 'Rejected')}
-                                    >
-                                        <XCircle className="h-4 w-4" />
-                                        <span>Отказать</span>
-                                    </Button>
-                                </>
-                            ) : (
-                                <span
-                                    className={`rounded-lg px-3.5 py-2 text-xs font-semibold ${
-                                        item.status === 'Interview'
-                                            ? 'bg-status-success/15 text-status-success'
-                                            : 'bg-status-danger/12 text-status-danger'
-                                    }`}
-                                >
-                  {item.status === 'Interview' ? 'Приглашен на интервью' : 'Отклонен'}
-                </span>
+                                        {APPLICATION_STATUSES.map((st) => (
+                                            <option key={st.key} value={st.key}>
+                                                {st.label} ({st.key})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {item.coverLetter && (
+                                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-700 leading-relaxed">
+                  <span className="font-semibold text-slate-500 block mb-1">
+                    Сопроводительное письмо кандидата:
+                  </span>
+                                    {item.coverLetter}
+                                </div>
                             )}
                         </div>
-                    </motion.div>
-                ))}
-            </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
